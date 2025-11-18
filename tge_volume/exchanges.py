@@ -28,6 +28,20 @@ EXCHANGE_NAME_TO_CCXT_ID = {
     "BitMart": "bitmart",
 }
 
+# Some exchanges require special setup to ensure we talk to the spot API.
+EXCHANGE_SETUP_OVERRIDES: Dict[str, Dict[str, Any]] = {
+    "bitmart": {
+        "options": {
+            "defaultType": "spot",
+            "fetchOHLCV": {"type": "spot"},
+        }
+    }
+}
+
+EXCHANGE_FETCH_OHLCV_PARAMS: Dict[str, Dict[str, Any]] = {
+    "bitmart": {"type": "spot"},
+}
+
 # Allow selectively disabling exchanges (e.g., for temporary outages) while
 # still showing them in the CLI output.
 DISABLED_EXCHANGES: Dict[str, str] = {}
@@ -74,7 +88,8 @@ def fetch_exchange_stats(
 ) -> Dict[str, Any]:
     """Fetch the earliest available OHLCV candle for the pair."""
     exchange_class = getattr(ccxt, exchange_id)
-    exchange = exchange_class()
+    exchange_kwargs = EXCHANGE_SETUP_OVERRIDES.get(exchange_id, {})
+    exchange = exchange_class(exchange_kwargs)
     exchange.load_markets()
 
     normalized_base = base.upper()
@@ -113,6 +128,8 @@ def fetch_exchange_stats(
 
     last_non_empty_batch: List[List[float]] | None = None
 
+    fetch_params = EXCHANGE_FETCH_OHLCV_PARAMS.get(exchange_id, {})
+
     try:
         while True:
             candles = exchange.fetch_ohlcv(
@@ -120,6 +137,7 @@ def fetch_exchange_stats(
                 timeframe=timeframe,
                 since=since_ts,
                 limit=limit,
+                params=fetch_params,
             )
             if not candles:
                 break
@@ -172,7 +190,13 @@ def fetch_exchange_stats(
         }
 
     try:
-        day = exchange.fetch_ohlcv(symbol, timeframe="1d", since=oldest_ts, limit=1)
+        day = exchange.fetch_ohlcv(
+            symbol,
+            timeframe="1d",
+            since=oldest_ts,
+            limit=1,
+            params=fetch_params,
+        )
         if day:
             day_open = day[0][1]
             day_high = day[0][2]

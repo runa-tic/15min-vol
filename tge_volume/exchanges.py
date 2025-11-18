@@ -73,11 +73,37 @@ def fetch_exchange_stats(
     if not symbol:
         raise RuntimeError(f"Пара {base}/{quote} не найдена на {exchange_id}")
 
+    timeframe = "15m"
+    timeframe_ms = exchange.parse_timeframe(timeframe) * 1000
+    limit = exchange.options.get("OHLCVLimit") or 500
+    since_ts = exchange.milliseconds() - timeframe_ms * limit
+
+    last_non_empty_batch: List[List[float]] | None = None
+
     try:
-        oldest = exchange.fetch_ohlcv(symbol, timeframe="15m", limit=1)
-        if not oldest:
+        while True:
+            candles = exchange.fetch_ohlcv(
+                symbol,
+                timeframe=timeframe,
+                since=since_ts,
+                limit=limit,
+            )
+            if not candles:
+                break
+
+            if (
+                last_non_empty_batch is not None
+                and candles[0][0] == last_non_empty_batch[0][0]
+            ):
+                break
+
+            last_non_empty_batch = candles
+            since_ts -= timeframe_ms * limit
+
+        if not last_non_empty_batch:
             raise RuntimeError("Биржа не вернула OHLCV")
-        oldest_ts, oldest_open, _, _, _, oldest_vol = oldest[0]
+
+        oldest_ts, oldest_open, _, _, _, oldest_vol = last_non_empty_batch[0]
     except Exception as exc:  # pragma: no cover - network errors
         raise RuntimeError(f"Не удалось получить самую раннюю свечу: {exc}") from exc
 

@@ -37,6 +37,10 @@ def build_markets(tickers: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         if not name:
             continue
 
+        if is_dex_name(name):
+            # The CLI focuses on centralized exchanges only, so skip DEX entries
+            continue
+
         base = ticker.get("base")
         quote = ticker.get("target")
         if not base or not quote:
@@ -49,7 +53,6 @@ def build_markets(tickers: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 "base": base,
                 "quote": quote,
                 "volume": volume,
-                "is_dex": is_dex_name(name),
                 "ccxt_id": EXCHANGE_NAME_TO_CCXT_ID.get(name),
             }
 

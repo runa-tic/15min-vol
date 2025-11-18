@@ -25,6 +25,7 @@ EXCHANGE_NAME_TO_CCXT_ID = {
     "Uniswap V2": "uniswap",
     "Uniswap V3 (Ethereum)": "uniswap",
     "PancakeSwap (v2)": "pancakeswap",
+    "BitMart": "bitmart",
 }
 
 # Some exchanges require special setup to ensure we talk to the spot API.

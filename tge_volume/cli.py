@@ -33,8 +33,7 @@ def choose_token(matches: List[Dict[str, Any]]) -> Dict[str, Any] | None:
 
 def _format_results(results: List[Dict[str, Any]]):
     valid = [r for r in results if r["tge_ts"]]
-    cex = [r for r in valid if not r["is_dex"]]
-    dex = [r for r in valid if r["is_dex"]]
+    cex = valid
 
     print("\n=======================")
     print("   PRICE ACTION / TGE")
@@ -52,18 +51,13 @@ def _format_results(results: List[Dict[str, Any]]):
 
     rows = []
     total_cex = 0
-    total_dex = 0
 
     for row in results:
         volume = row["first_15m_volume"] or 0
-        if row["is_dex"]:
-            total_dex += volume
-        else:
-            total_cex += volume
+        total_cex += volume
 
         rows.append([
             row["exchange_name"],
-            "DEX" if row["is_dex"] else "CEX",
             ts_to_str(row["tge_ts"]),
             f"{row['first_15m_volume']:.4f}" if row["first_15m_volume"] else "-",
             f"{row['day_open']:.6f}" if row["day_open"] else "-",
@@ -74,16 +68,15 @@ def _format_results(results: List[Dict[str, Any]]):
 
     print("\nДетализация:\n")
     print(
-        tabulate(
-            rows,
-            headers=[
-                "EXCHANGE",
-                "TYPE",
-                "TGE DATE",
-                "15m VOL",
-                "DAY1 OPEN",
-                "DAY1 HIGH",
-                "HIGH/OPEN",
+            tabulate(
+                rows,
+                headers=[
+                    "EXCHANGE",
+                    "TGE DATE",
+                    "15m VOL",
+                    "DAY1 OPEN",
+                    "DAY1 HIGH",
+                    "HIGH/OPEN",
                 "NOTE/ERROR",
             ],
             tablefmt="github",
@@ -92,8 +85,7 @@ def _format_results(results: List[Dict[str, Any]]):
 
     print("\nИТОГИ:")
     print("TOTAL_CEX :", total_cex)
-    print("TOTAL_DEX :", total_dex)
-    print("TOTAL     :", total_cex + total_dex)
+    print("TOTAL     :", total_cex)
 
 
 def main() -> None:
@@ -114,7 +106,7 @@ def main() -> None:
     tickers, coin_data = get_coin_tickers(coin_id)
     markets = build_markets(tickers)
 
-    print(f"\nНайдено бирж/DEX: {len(markets)}")
+    print(f"\nНайдено бирж: {len(markets)}")
     for market in markets:
         print(
             f" - {market['exchange_name']} → ccxt_id={market['ccxt_id']} → {market['base']}/{market['quote']}"

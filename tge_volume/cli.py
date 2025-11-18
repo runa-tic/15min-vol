@@ -50,7 +50,7 @@ def _format_results(results: List[Dict[str, Any]]):
         print("CEX-листингов не найдено (по данным ccxt).")
 
     rows = []
-    total_cex = 0
+    total_cex = 0.0
 
     for row in results:
         volume = row["first_15m_volume"] or 0
@@ -59,7 +59,7 @@ def _format_results(results: List[Dict[str, Any]]):
         rows.append([
             row["exchange_name"],
             ts_to_str(row["tge_ts"]),
-            f"{row['first_15m_volume']:.4f}" if row["first_15m_volume"] else "-",
+            f"{row['first_15m_volume']:.2f}" if row["first_15m_volume"] else "-",
             f"{row['day_open']:.6f}" if row["day_open"] else "-",
             f"{row['day_high']:.6f}" if row["day_high"] else "-",
             f"{row['day_delta_ratio']:.2f}x" if row["day_delta_ratio"] else "-",
@@ -73,19 +73,19 @@ def _format_results(results: List[Dict[str, Any]]):
                 headers=[
                     "EXCHANGE",
                     "TGE DATE",
-                    "15m VOL",
+                    "15m VOL (USDT)",
                     "DAY1 OPEN",
                     "DAY1 HIGH",
                     "HIGH/OPEN",
-                "NOTE/ERROR",
-            ],
+                    "NOTE/ERROR",
+                ],
             tablefmt="github",
         )
     )
 
     print("\nИТОГИ:")
-    print("TOTAL_CEX :", total_cex)
-    print("TOTAL     :", total_cex)
+    print("TOTAL_CEX :", f"{total_cex:.2f}")
+    print("TOTAL     :", f"{total_cex:.2f}")
 
 
 def main() -> None:
@@ -122,7 +122,8 @@ def main() -> None:
             results.append(
                 {
                     **market,
-                    "error": "Биржа не поддерживается ccxt",
+                    "error": market.get("disabled_reason")
+                    or "Биржа не поддерживается ccxt",
                     "tge_ts": None,
                     "tge_open": None,
                     "first_15m_volume": None,

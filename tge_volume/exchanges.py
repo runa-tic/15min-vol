@@ -18,6 +18,7 @@ EXCHANGE_NAME_TO_CCXT_ID = {
     "Gate.io": "gateio",
     "Gate (Spot)": "gateio",
     "MEXC": "mexc",
+    "BitMart": "bitmart",
     "Bitget": "bitget",
     "Coinbase Exchange": "coinbase",
     "Kraken": "kraken",
@@ -27,7 +28,9 @@ EXCHANGE_NAME_TO_CCXT_ID = {
     "BitMart": "bitmart",
 }
 
-
+# Allow selectively disabling exchanges (e.g., for temporary outages) while
+# still showing them in the CLI output.
+DISABLED_EXCHANGES: Dict[str, str] = {}
 
 def build_markets(tickers: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Return a deduplicated list of markets with volume metadata."""
@@ -49,12 +52,14 @@ def build_markets(tickers: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
         volume = ticker.get("volume") or 0
         if name not in markets or volume > markets[name]["volume"]:
+            disabled_reason = DISABLED_EXCHANGES.get(name)
             markets[name] = {
                 "exchange_name": name,
                 "base": base,
                 "quote": quote,
                 "volume": volume,
-                "ccxt_id": EXCHANGE_NAME_TO_CCXT_ID.get(name),
+                "ccxt_id": None if disabled_reason else EXCHANGE_NAME_TO_CCXT_ID.get(name),
+                "disabled_reason": disabled_reason,
             }
 
     return list(markets.values())
@@ -72,10 +77,34 @@ def fetch_exchange_stats(
     exchange = exchange_class()
     exchange.load_markets()
 
-    symbol_candidates = [f"{base}/{quote}", f"{base.upper()}/{quote.upper()}"]
-    symbol = next((candidate for candidate in symbol_candidates if candidate in exchange.markets), None)
-    if not symbol:
+    normalized_base = base.upper()
+    normalized_quote = quote.upper()
+
+    def _matching_markets(prefer_spot: bool) -> List[Dict[str, Any]]:
+        matches: List[Dict[str, Any]] = []
+        for market in exchange.markets.values():
+            market_base = market.get("base")
+            market_quote = market.get("quote")
+            if not market_base or not market_quote:
+                continue
+            if market_base.upper() == normalized_base and market_quote.upper() == normalized_quote:
+                if not prefer_spot or market.get("spot"):
+                    matches.append(market)
+        return matches
+
+    spot_matches = _matching_markets(prefer_spot=True)
+    derivative_matches = _matching_markets(prefer_spot=False)
+
+    market = None
+    if spot_matches:
+        market = spot_matches[0]
+    elif derivative_matches:
+        market = derivative_matches[0]
+
+    if not market:
         raise RuntimeError(f"Пара {base}/{quote} не найдена на {exchange_id}")
+
+    symbol = market["symbol"]
 
     timeframe = "15m"
     timeframe_ms = exchange.parse_timeframe(timeframe) * 1000
@@ -107,7 +136,27 @@ def fetch_exchange_stats(
         if not last_non_empty_batch:
             raise RuntimeError("Биржа не вернула OHLCV")
 
-        oldest_ts, oldest_open, _, _, _, oldest_vol = last_non_empty_batch[0]
+        (
+            oldest_ts,
+            oldest_open,
+            oldest_high,
+            oldest_low,
+            oldest_close,
+            oldest_vol,
+        ) = last_non_empty_batch[0]
+
+        reference_price = next(
+            (
+                price
+                for price in [oldest_close, oldest_open, oldest_high, oldest_low]
+                if price
+            ),
+            None,
+        )
+
+        first_15m_volume_quote = (
+            oldest_vol * reference_price if oldest_vol and reference_price else None
+        )
     except Exception as exc:  # pragma: no cover - network errors
         raise RuntimeError(f"Не удалось получить самую раннюю свечу: {exc}") from exc
 
@@ -115,7 +164,7 @@ def fetch_exchange_stats(
         return {
             "tge_ts": oldest_ts,
             "tge_open": oldest_open,
-            "first_15m_volume": oldest_vol,
+            "first_15m_volume": first_15m_volume_quote,
             "day_open": None,
             "day_high": None,
             "day_delta_ratio": None,
@@ -136,7 +185,7 @@ def fetch_exchange_stats(
     return {
         "tge_ts": oldest_ts,
         "tge_open": oldest_open,
-        "first_15m_volume": oldest_vol,
+        "first_15m_volume": first_15m_volume_quote,
         "day_open": day_open,
         "day_high": day_high,
         "day_delta_ratio": day_delta,

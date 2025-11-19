@@ -174,6 +174,104 @@ def _export_trading_flow_csv(markets: List[Dict[str, Any]], path: str) -> None:
     )
 
 
+def _export_trading_flow_csv(markets: List[Dict[str, Any]], path: str) -> None:
+    """Dump 15m OHLCV across all available exchanges for debugging."""
+
+    fieldnames = [
+        "exchange",
+        "symbol",
+        "timestamp_ms",
+        "timestamp",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume_base",
+        "volume_quote",
+        "error",
+    ]
+
+    rows: List[Dict[str, Any]] = []
+
+    for market in markets:
+        exchange_name = market["exchange_name"]
+        symbol_pair = f"{market['base']}/{market['quote']}"
+
+        if not market["ccxt_id"]:
+            rows.append(
+                {
+                    "exchange": exchange_name,
+                    "symbol": symbol_pair,
+                    "timestamp_ms": None,
+                    "timestamp": None,
+                    "open": None,
+                    "high": None,
+                    "low": None,
+                    "close": None,
+                    "volume_base": None,
+                    "volume_quote": None,
+                    "error": market.get("disabled_reason")
+                    or "Биржа не поддерживается ccxt",
+                }
+            )
+            continue
+
+        try:
+            candles = fetch_trading_flow(
+                market["ccxt_id"], market["base"], market["quote"], timeframe="15m"
+            )
+            for candle in candles:
+                ts, open_, high, low, close, volume = candle
+                volume_quote = volume * close if volume and close else None
+                rows.append(
+                    {
+                        "exchange": exchange_name,
+                        "symbol": symbol_pair,
+                        "timestamp_ms": ts,
+                        "timestamp": ts_to_str(ts),
+                        "open": open_,
+                        "high": high,
+                        "low": low,
+                        "close": close,
+                        "volume_base": volume,
+                        "volume_quote": volume_quote,
+                        "error": None,
+                    }
+                )
+        except Exception as exc:
+            rows.append(
+                {
+                    "exchange": exchange_name,
+                    "symbol": symbol_pair,
+                    "timestamp_ms": None,
+                    "timestamp": None,
+                    "open": None,
+                    "high": None,
+                    "low": None,
+                    "close": None,
+                    "volume_base": None,
+                    "volume_quote": None,
+                    "error": str(exc),
+                }
+            )
+
+    if not rows:
+        print("\n[DEBUG] Не удалось собрать торговый поток — данные отсутствуют.")
+        return
+
+    with open(path, "w", newline="") as fp:
+        writer = csv.DictWriter(fp, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    rows_written = len(rows)
+    error_rows = len([r for r in rows if r["error"]])
+    print(
+        f"\n[DEBUG] 15m trading flow сохранён в {path} — "
+        f"{rows_written} строк (ошибки: {error_rows})."
+    )
+
+
 def main() -> None:
     symbol = input("Введите тикер токена (без $): ").strip()
     matches = search_token(symbol)

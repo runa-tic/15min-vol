@@ -55,6 +55,18 @@ The app will search CoinGecko for the ticker, gather exchange data, print a cons
 
 This flow builds the standard console binary and ships a small `.command` helper so macOS users can double-click to run the CLI in Terminal. The Terminal window closes automatically after the CLI finishes.
 
+#### One-command automation (recommended)
+
+On macOS, run the helper script to build the binary, copy the wrapper, and produce the double-clickable launcher in `dist/`:
+
+```bash
+./scripts/build_mac_cli.sh
+```
+
+After it finishes, double-click `dist/mac_run_cli.command` in Finder (or run `./dist/mac_run_cli.command` in Terminal), enter your ticker when prompted, and the Terminal window will auto-close when the CLI completes.
+
+#### Manual steps
+
 1. Install build tooling (preferably in a clean virtual environment):
    ```bash
    python3 -m pip install --upgrade pip

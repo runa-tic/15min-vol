@@ -26,6 +26,8 @@ EXCHANGE_NAME_TO_CCXT_ID = {
     "Uniswap V3 (Ethereum)": "uniswap",
     "PancakeSwap (v2)": "pancakeswap",
     "BitMart": "bitmart",
+    "BingX": "bingx",
+    "LBank": "lbank",
 }
 
 # Some exchanges require special setup to ensure we talk to the spot API.
@@ -212,6 +214,8 @@ def fetch_exchange_stats(
 
         if not candles:
             raise RuntimeError("Exchange returned no OHLCV data")
+
+        target_candle = candles[0]
 
         target_candle = candles[0]
 

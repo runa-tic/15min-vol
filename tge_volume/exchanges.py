@@ -124,35 +124,70 @@ def fetch_exchange_stats(
     timeframe = "15m"
     timeframe_ms = exchange.parse_timeframe(timeframe) * 1000
     limit = exchange.options.get("OHLCVLimit") or 500
-    since_ts = exchange.milliseconds() - timeframe_ms * limit
-
-    last_non_empty_batch: List[List[float]] | None = None
-
     fetch_params = EXCHANGE_FETCH_OHLCV_PARAMS.get(exchange_id, {})
 
+    def _select_candle(candles: List[List[float]], target_ts: int | None):
+        if not candles:
+            return None
+
+        if target_ts:
+            for candle in candles:
+                start = candle[0]
+                if start <= target_ts < start + timeframe_ms:
+                    return candle
+
+            after = [c for c in candles if c[0] >= target_ts]
+            if after:
+                return after[0]
+
+            before = [c for c in candles if c[0] <= target_ts]
+            if before:
+                return before[-1]
+
+        return candles[0]
+
     try:
-        while True:
-            candles = exchange.fetch_ohlcv(
+        target_candle = None
+
+        if expected_tge_ts:
+            window_since = expected_tge_ts - timeframe_ms * (limit // 2)
+            window = exchange.fetch_ohlcv(
                 symbol,
                 timeframe=timeframe,
-                since=since_ts,
+                since=window_since,
                 limit=limit,
                 params=fetch_params,
             )
-            if not candles:
-                break
+            target_candle = _select_candle(window, expected_tge_ts)
 
-            if (
-                last_non_empty_batch is not None
-                and candles[0][0] == last_non_empty_batch[0][0]
-            ):
-                break
+        if not target_candle:
+            since_ts = exchange.milliseconds() - timeframe_ms * limit
+            last_non_empty_batch: List[List[float]] | None = None
 
-            last_non_empty_batch = candles
-            since_ts -= timeframe_ms * limit
+            while True:
+                candles = exchange.fetch_ohlcv(
+                    symbol,
+                    timeframe=timeframe,
+                    since=since_ts,
+                    limit=limit,
+                    params=fetch_params,
+                )
+                if not candles:
+                    break
 
-        if not last_non_empty_batch:
-            raise RuntimeError("Биржа не вернула OHLCV")
+                if (
+                    last_non_empty_batch is not None
+                    and candles[0][0] == last_non_empty_batch[0][0]
+                ):
+                    break
+
+                last_non_empty_batch = candles
+                since_ts -= timeframe_ms * limit
+
+            if not last_non_empty_batch:
+                raise RuntimeError("Биржа не вернула OHLCV")
+
+            target_candle = last_non_empty_batch[0]
 
         (
             oldest_ts,
@@ -161,7 +196,7 @@ def fetch_exchange_stats(
             oldest_low,
             oldest_close,
             oldest_vol,
-        ) = last_non_empty_batch[0]
+        ) = target_candle
 
         reference_price = next(
             (
@@ -190,19 +225,45 @@ def fetch_exchange_stats(
         }
 
     try:
+        day_timeframe_ms = exchange.parse_timeframe("1d") * 1000
+        target_ts = oldest_ts
+        # Request a window that surely covers the target TGE day.  Some
+        # exchanges round the `since` argument down to daily boundaries and
+        # return the *previous* day when `since` is close to midnight.  By
+        # asking for a slightly earlier window (two days back) and then
+        # picking the candle that actually contains the target timestamp we
+        # avoid mismatches (e.g., reporting the day before/after TGE).
+        day_since_ts = (target_ts or oldest_ts) - day_timeframe_ms * 2
         day = exchange.fetch_ohlcv(
             symbol,
             timeframe="1d",
-            since=oldest_ts,
-            limit=1,
+            since=day_since_ts,
+            limit=10,
             params=fetch_params,
         )
+
+        day_open = day_high = day_delta = None
         if day:
-            day_open = day[0][1]
-            day_high = day[0][2]
-            day_delta = (day_high / day_open) if day_open else None
-        else:
-            day_open = day_high = day_delta = None
+            day_candle = None
+            for candle in day:
+                start = candle[0]
+                if start <= target_ts < start + day_timeframe_ms:
+                    day_candle = candle
+                    break
+
+            if not day_candle:
+                # Fallback to the latest candle before the target timestamp,
+                # or the first candle if the exchange returned only newer
+                # data.  This mirrors the old behaviour but only when we fail
+                # to confidently identify the TGE day.
+                eligible = [c for c in day if c[0] <= target_ts]
+                day_candle = max(eligible, key=lambda c: c[0], default=day[0])
+
+            day_open = day_candle[1]
+            day_high = day_candle[2]
+            # The CLI reports the "HIGH/OPEN" metric as the multiplier
+            # between the first day's high and the launch (TGE) open.
+            day_delta = (day_high / oldest_open) if oldest_open else None
     except Exception:  # pragma: no cover - network errors
         day_open = day_high = day_delta = None
 

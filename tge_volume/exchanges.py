@@ -1,7 +1,7 @@
 """Helpers for building a ccxt-compatible market list and fetching OHLCV data."""
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 import ccxt
 
@@ -80,13 +80,11 @@ def build_markets(tickers: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 
-def fetch_exchange_stats(
-    exchange_id: str,
-    base: str,
-    quote: str,
-    expected_tge_ts: int | None = None,
-) -> Dict[str, Any]:
-    """Fetch the earliest available OHLCV candle for the pair."""
+def _prepare_exchange_market(
+    exchange_id: str, base: str, quote: str, timeframe: str = "15m"
+) -> Tuple[ccxt.Exchange, str, int, int, Dict[str, Any]]:
+    """Return an initialized exchange, symbol and OHLCV fetch config."""
+
     exchange_class = getattr(ccxt, exchange_id)
     exchange_kwargs = EXCHANGE_SETUP_OVERRIDES.get(exchange_id, {})
     exchange = exchange_class(exchange_kwargs)
@@ -117,42 +115,105 @@ def fetch_exchange_stats(
         market = derivative_matches[0]
 
     if not market:
-        raise RuntimeError(f"Пара {base}/{quote} не найдена на {exchange_id}")
+        raise RuntimeError(f"Pair {base}/{quote} was not found on {exchange_id}")
 
     symbol = market["symbol"]
-
-    timeframe = "15m"
     timeframe_ms = exchange.parse_timeframe(timeframe) * 1000
     limit = exchange.options.get("OHLCVLimit") or 500
-    since_ts = exchange.milliseconds() - timeframe_ms * limit
-
-    last_non_empty_batch: List[List[float]] | None = None
-
     fetch_params = EXCHANGE_FETCH_OHLCV_PARAMS.get(exchange_id, {})
 
+    return exchange, symbol, timeframe_ms, limit, fetch_params
+
+
+def _collect_full_ohlcv(
+    exchange: ccxt.Exchange,
+    symbol: str,
+    timeframe: str,
+    timeframe_ms: int,
+    limit: int,
+    fetch_params: Dict[str, Any],
+) -> List[List[float]]:
+    """Fetch the full available OHLCV history for the given symbol."""
+
+    earliest_batch: List[List[float]] | None = None
+    probe_since = exchange.milliseconds() - timeframe_ms * limit
+    while True:
+        candles = exchange.fetch_ohlcv(
+            symbol,
+            timeframe=timeframe,
+            since=probe_since,
+            limit=limit,
+            params=fetch_params,
+        )
+        if not candles:
+            break
+        if earliest_batch is not None and candles[0][0] == earliest_batch[0][0]:
+            break
+        earliest_batch = candles
+        probe_since -= timeframe_ms * limit
+
+    if not earliest_batch:
+        return []
+
+    all_candles: List[List[float]] = []
+    next_since = earliest_batch[0][0]
+    last_first_ts = None
+
+    while True:
+        candles = exchange.fetch_ohlcv(
+            symbol,
+            timeframe=timeframe,
+            since=next_since,
+            limit=limit,
+            params=fetch_params,
+        )
+        if not candles:
+            break
+        if last_first_ts is not None and candles[0][0] == last_first_ts:
+            break
+
+        last_first_ts = candles[0][0]
+        all_candles.extend(candles)
+        next_since = candles[-1][0] + timeframe_ms
+
+        if len(candles) < limit:
+            break
+
+    dedup = {candle[0]: candle for candle in all_candles}
+    return [dedup[ts] for ts in sorted(dedup)]
+
+
+def fetch_exchange_stats(
+    exchange_id: str,
+    base: str,
+    quote: str,
+    expected_tge_ts: int | None = None,
+) -> Dict[str, Any]:
+    """Fetch the earliest available OHLCV candle for the pair."""
+
+    (
+        exchange,
+        symbol,
+        timeframe_ms,
+        limit,
+        fetch_params,
+    ) = _prepare_exchange_market(exchange_id, base, quote)
+    timeframe = "15m"
+
     try:
-        while True:
-            candles = exchange.fetch_ohlcv(
-                symbol,
-                timeframe=timeframe,
-                since=since_ts,
-                limit=limit,
-                params=fetch_params,
-            )
-            if not candles:
-                break
+        candles = _collect_full_ohlcv(
+            exchange,
+            symbol,
+            timeframe,
+            timeframe_ms,
+            limit,
+            fetch_params,
+        )
 
-            if (
-                last_non_empty_batch is not None
-                and candles[0][0] == last_non_empty_batch[0][0]
-            ):
-                break
+        if not candles:
+            raise RuntimeError("Exchange returned no OHLCV data")
 
-            last_non_empty_batch = candles
-            since_ts -= timeframe_ms * limit
-
-        if not last_non_empty_batch:
-            raise RuntimeError("Биржа не вернула OHLCV")
+        target_candle = candles[0]
 
         (
             oldest_ts,
@@ -161,7 +222,7 @@ def fetch_exchange_stats(
             oldest_low,
             oldest_close,
             oldest_vol,
-        ) = last_non_empty_batch[0]
+        ) = target_candle
 
         reference_price = next(
             (
@@ -176,7 +237,7 @@ def fetch_exchange_stats(
             oldest_vol * reference_price if oldest_vol and reference_price else None
         )
     except Exception as exc:  # pragma: no cover - network errors
-        raise RuntimeError(f"Не удалось получить самую раннюю свечу: {exc}") from exc
+        raise RuntimeError(f"Failed to obtain earliest candle: {exc}") from exc
 
     if expected_tge_ts and oldest_ts > expected_tge_ts:
         return {
@@ -186,23 +247,49 @@ def fetch_exchange_stats(
             "day_open": None,
             "day_high": None,
             "day_delta_ratio": None,
-            "note": "История биржи начинается ПОСЛЕ TGE — реальный TGE недоступен",
+            "note": "Exchange history starts after TGE — launch candle unavailable",
         }
 
     try:
+        day_timeframe_ms = exchange.parse_timeframe("1d") * 1000
+        target_ts = oldest_ts
+        # Request a window that surely covers the target TGE day.  Some
+        # exchanges round the `since` argument down to daily boundaries and
+        # return the *previous* day when `since` is close to midnight.  By
+        # asking for a slightly earlier window (two days back) and then
+        # picking the candle that actually contains the target timestamp we
+        # avoid mismatches (e.g., reporting the day before/after TGE).
+        day_since_ts = (target_ts or oldest_ts) - day_timeframe_ms * 2
         day = exchange.fetch_ohlcv(
             symbol,
             timeframe="1d",
-            since=oldest_ts,
-            limit=1,
+            since=day_since_ts,
+            limit=10,
             params=fetch_params,
         )
+
+        day_open = day_high = day_delta = None
         if day:
-            day_open = day[0][1]
-            day_high = day[0][2]
-            day_delta = (day_high / day_open) if day_open else None
-        else:
-            day_open = day_high = day_delta = None
+            day_candle = None
+            for candle in day:
+                start = candle[0]
+                if start <= target_ts < start + day_timeframe_ms:
+                    day_candle = candle
+                    break
+
+            if not day_candle:
+                # Fallback to the latest candle before the target timestamp,
+                # or the first candle if the exchange returned only newer
+                # data.  This mirrors the old behaviour but only when we fail
+                # to confidently identify the TGE day.
+                eligible = [c for c in day if c[0] <= target_ts]
+                day_candle = max(eligible, key=lambda c: c[0], default=day[0])
+
+            day_open = day_candle[1]
+            day_high = day_candle[2]
+            # The CLI reports the "HIGH/OPEN" metric as the multiplier
+            # between the first day's high and the launch (TGE) open.
+            day_delta = (day_high / oldest_open) if oldest_open else None
     except Exception:  # pragma: no cover - network errors
         day_open = day_high = day_delta = None
 
@@ -215,3 +302,31 @@ def fetch_exchange_stats(
         "day_delta_ratio": day_delta,
         "note": None,
     }
+
+
+def fetch_trading_flow(
+    exchange_id: str, base: str, quote: str, timeframe: str = "15m"
+) -> List[List[float]]:
+    """Return the full 15m trading flow for debugging purposes."""
+
+    (
+        exchange,
+        symbol,
+        timeframe_ms,
+        limit,
+        fetch_params,
+    ) = _prepare_exchange_market(exchange_id, base, quote, timeframe=timeframe)
+
+    try:
+        return _collect_full_ohlcv(
+            exchange,
+            symbol,
+            timeframe,
+            timeframe_ms,
+            limit,
+            fetch_params,
+        )
+    except Exception as exc:  # pragma: no cover - network errors
+        raise RuntimeError(
+            f"Could not download full {timeframe} candle history: {exc}"
+        ) from exc

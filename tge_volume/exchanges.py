@@ -190,26 +190,45 @@ def fetch_exchange_stats(
         }
 
     try:
+        day_timeframe_ms = exchange.parse_timeframe("1d") * 1000
+        target_ts = expected_tge_ts or oldest_ts
+        # Request a window that surely covers the target TGE day.  Some
+        # exchanges round the `since` argument down to daily boundaries and
+        # return the *previous* day when `since` is close to midnight.  By
+        # asking for a slightly earlier window (two days back) and then
+        # picking the candle that actually contains the target timestamp we
+        # avoid mismatches (e.g., reporting the day before/after TGE).
+        day_since_ts = (target_ts or oldest_ts) - day_timeframe_ms * 2
         day = exchange.fetch_ohlcv(
             symbol,
             timeframe="1d",
-            since=oldest_ts,
-            limit=1,
+            since=day_since_ts,
+            limit=10,
             params=fetch_params,
         )
+
+        day_open = day_high = day_delta = None
         if day:
-            day_open = day[0][1]
-            day_high = day[0][2]
+            day_candle = None
+            for candle in day:
+                start = candle[0]
+                if start <= target_ts < start + day_timeframe_ms:
+                    day_candle = candle
+                    break
+
+            if not day_candle:
+                # Fallback to the latest candle before the target timestamp,
+                # or the first candle if the exchange returned only newer
+                # data.  This mirrors the old behaviour but only when we fail
+                # to confidently identify the TGE day.
+                eligible = [c for c in day if c[0] <= target_ts]
+                day_candle = max(eligible, key=lambda c: c[0], default=day[0])
+
+            day_open = day_candle[1]
+            day_high = day_candle[2]
             # The CLI reports the "HIGH/OPEN" metric as the multiplier
             # between the first day's high and the launch (TGE) open.
-            # Previously, we compared the day high with the daily candle's
-            # open which can be slightly later than the very first traded
-            # price, leading to understated multipliers.  Using the oldest
-            # 15m candle's open aligns the ratio with the actual launch
-            # price and reflects spikes that happened immediately after TGE.
             day_delta = (day_high / oldest_open) if oldest_open else None
-        else:
-            day_open = day_high = day_delta = None
     except Exception:  # pragma: no cover - network errors
         day_open = day_high = day_delta = None
 

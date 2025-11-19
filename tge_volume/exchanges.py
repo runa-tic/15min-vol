@@ -200,7 +200,14 @@ def fetch_exchange_stats(
         if day:
             day_open = day[0][1]
             day_high = day[0][2]
-            day_delta = (day_high / day_open) if day_open else None
+            # The CLI reports the "HIGH/OPEN" metric as the multiplier
+            # between the first day's high and the launch (TGE) open.
+            # Previously, we compared the day high with the daily candle's
+            # open which can be slightly later than the very first traded
+            # price, leading to understated multipliers.  Using the oldest
+            # 15m candle's open aligns the ratio with the actual launch
+            # price and reflects spikes that happened immediately after TGE.
+            day_delta = (day_high / oldest_open) if oldest_open else None
         else:
             day_open = day_high = day_delta = None
     except Exception:  # pragma: no cover - network errors

@@ -200,68 +200,20 @@ def fetch_exchange_stats(
     ) = _prepare_exchange_market(exchange_id, base, quote)
     timeframe = "15m"
 
-    def _select_candle(candles: List[List[float]], target_ts: int | None):
-        if not candles:
-            return None
-
-        if target_ts:
-            for candle in candles:
-                start = candle[0]
-                if start <= target_ts < start + timeframe_ms:
-                    return candle
-
-            after = [c for c in candles if c[0] >= target_ts]
-            if after:
-                return after[0]
-
-            before = [c for c in candles if c[0] <= target_ts]
-            if before:
-                return before[-1]
-
-        return candles[0]
-
     try:
-        target_candle = None
+        candles = _collect_full_ohlcv(
+            exchange,
+            symbol,
+            timeframe,
+            timeframe_ms,
+            limit,
+            fetch_params,
+        )
 
-        if expected_tge_ts:
-            window_since = expected_tge_ts - timeframe_ms * (limit // 2)
-            window = exchange.fetch_ohlcv(
-                symbol,
-                timeframe=timeframe,
-                since=window_since,
-                limit=limit,
-                params=fetch_params,
-            )
-            target_candle = _select_candle(window, expected_tge_ts)
+        if not candles:
+            raise RuntimeError("Биржа не вернула OHLCV")
 
-        if not target_candle:
-            since_ts = exchange.milliseconds() - timeframe_ms * limit
-            last_non_empty_batch: List[List[float]] | None = None
-
-            while True:
-                candles = exchange.fetch_ohlcv(
-                    symbol,
-                    timeframe=timeframe,
-                    since=since_ts,
-                    limit=limit,
-                    params=fetch_params,
-                )
-                if not candles:
-                    break
-
-                if (
-                    last_non_empty_batch is not None
-                    and candles[0][0] == last_non_empty_batch[0][0]
-                ):
-                    break
-
-                last_non_empty_batch = candles
-                since_ts -= timeframe_ms * limit
-
-            if not last_non_empty_batch:
-                raise RuntimeError("Биржа не вернула OHLCV")
-
-            target_candle = last_non_empty_batch[0]
+        target_candle = candles[0]
 
         (
             oldest_ts,

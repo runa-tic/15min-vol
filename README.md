@@ -51,69 +51,47 @@ The app will search CoinGecko for the ticker, gather exchange data, print a cons
 
 ## Packaging for macOS (PyInstaller)
 
-### Double-clickable macOS app bundle (recommended for non-terminal users)
+### Double-click wrapper that runs the CLI (no standalone app bundle)
 
-This creates a `.app` you can double-click. The GUI launcher in `tge_volume/gui_app.py` wraps the CLI, collects the token ticker and CSV destination, and shows the log output in-window.
-
-1. Install build tooling (preferably in a clean virtual environment):
-   ```bash
-   python3 -m pip install --upgrade pip
-   python3 -m pip install -r requirements.txt pyinstaller
-   ```
-2. Build the `.app` bundle from the repo root:
-   ```bash
-   pyinstaller --onedir --windowed --name "TGE Volume" --osx-bundle-identifier com.example.tgevolume tge_volume/gui_app.py
-   ```
-   - The output lives at `dist/TGE Volume.app`; double-click to run the GUI.
-   - `--windowed` removes the terminal window, so macOS treats this as a regular app icon.
-3. (Optional) Codesign and notarize before sharing:
-   ```bash
-   codesign --deep --force --options runtime --sign "Developer ID Application: Your Name (TEAMID)" "dist/TGE Volume.app"
-   xcrun notarytool submit "dist/TGE Volume.app" --apple-id <your-apple-id> --team-id <TEAMID> --password <app-password> --wait
-   xcrun stapler staple "dist/TGE Volume.app"
-   ```
-4. Zip for distribution:
-   ```bash
-   cd dist
-   zip -r "TGE Volume.app.zip" "TGE Volume.app"
-   ```
-   End users can unzip and double-click `TGE Volume.app`, enter the ticker, and pick a CSV path. The GUI logs progress and errors without requiring Terminal.
-
-### Terminal-friendly one-file binary
-
-If you prefer the CLI-only experience (run from Terminal), build a single-file console binary instead:
+This flow builds the standard console binary and ships a small `.command` helper so macOS users can double-click to run the CLI in Terminal. The Terminal window closes automatically after the CLI finishes.
 
 1. Install build tooling (preferably in a clean virtual environment):
    ```bash
    python3 -m pip install --upgrade pip
    python3 -m pip install -r requirements.txt pyinstaller
    ```
-2. Build the executable from the repo root:
+2. Build the console executable from the repo root:
    ```bash
    pyinstaller --onefile --name tge-volume-mac --console tge_volume/__main__.py
    ```
    - `--onefile` packs everything into a single binary.
    - `--console` preserves terminal I/O for this CLI.
    - Using the package's `__main__.py` entrypoint matches `python -m tge_volume` while satisfying PyInstaller's required `scriptname` positional argument.
-3. Test the output in `dist/`:
+3. Copy the double-click wrapper into the build output and make it executable:
    ```bash
-   ./dist/tge-volume-mac --help
-   ./dist/tge-volume-mac ELIZAOS --output-csv debug_trading_flow.csv
+   cp mac_run_cli.command dist/
+   chmod +x dist/mac_run_cli.command
    ```
-   - If you move the binary elsewhere, use the full absolute path (e.g., `/Users/<you>/Desktop/15min-vol/dist/tge-volume-mac --help`). Missing the leading `/` will cause "no such file or directory" errors in shells like zsh.
-4. (Optional) Strip debug symbols to reduce size:
+   - The wrapper expects `tge-volume-mac` to live next to it inside `dist/`.
+4. Test locally:
+   ```bash
+   ./dist/mac_run_cli.command --help
+   ./dist/mac_run_cli.command ELIZAOS --output-csv debug_trading_flow.csv
+   ```
+   - Double-click `mac_run_cli.command` in Finder to launch the CLI; the Terminal window will auto-close when execution ends.
+5. (Optional) Strip debug symbols to reduce size:
    ```bash
    strip dist/tge-volume-mac
    ```
-5. Sign and notarize for macOS distribution (requires Apple Developer credentials):
+6. Sign and notarize for macOS distribution (requires Apple Developer credentials):
    ```bash
-   codesign --deep --force --options runtime --sign "Developer ID Application: Your Name (TEAMID)" dist/tge-volume-mac
-   xcrun notarytool submit dist/tge-volume-mac --apple-id <your-apple-id> --team-id <TEAMID> --password <app-password> --wait
-   xcrun stapler staple dist/tge-volume-mac
+   codesign --deep --force --options runtime --sign "Developer ID Application: Your Name (TEAMID)" dist/tge-volume-mac dist/mac_run_cli.command
+   xcrun notarytool submit dist/tge-volume-mac dist/mac_run_cli.command --apple-id <your-apple-id> --team-id <TEAMID> --password <app-password> --wait
+   xcrun stapler staple dist/tge-volume-mac dist/mac_run_cli.command
    ```
-6. Package for sharing:
+7. Package for sharing:
    ```bash
    cd dist
-   zip tge-volume-mac.zip tge-volume-mac
+   zip tge-volume-mac.zip tge-volume-mac mac_run_cli.command
    ```
-   Distribute `tge-volume-mac.zip`; end users can unzip and run from Terminal with the same arguments shown in the Usage examples.
+   Distribute `tge-volume-mac.zip`; end users can unzip and double-click `mac_run_cli.command` to run the CLI without keeping Terminal open afterwards.

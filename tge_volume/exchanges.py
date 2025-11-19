@@ -117,7 +117,7 @@ def _prepare_exchange_market(
         market = derivative_matches[0]
 
     if not market:
-        raise RuntimeError(f"Пара {base}/{quote} не найдена на {exchange_id}")
+        raise RuntimeError(f"Pair {base}/{quote} was not found on {exchange_id}")
 
     symbol = market["symbol"]
     timeframe_ms = exchange.parse_timeframe(timeframe) * 1000
@@ -213,7 +213,9 @@ def fetch_exchange_stats(
         )
 
         if not candles:
-            raise RuntimeError("Биржа не вернула OHLCV")
+            raise RuntimeError("Exchange returned no OHLCV data")
+
+        target_candle = candles[0]
 
         target_candle = candles[0]
 
@@ -239,7 +241,7 @@ def fetch_exchange_stats(
             oldest_vol * reference_price if oldest_vol and reference_price else None
         )
     except Exception as exc:  # pragma: no cover - network errors
-        raise RuntimeError(f"Не удалось получить самую раннюю свечу: {exc}") from exc
+        raise RuntimeError(f"Failed to obtain earliest candle: {exc}") from exc
 
     if expected_tge_ts and oldest_ts > expected_tge_ts:
         return {
@@ -249,7 +251,7 @@ def fetch_exchange_stats(
             "day_open": None,
             "day_high": None,
             "day_delta_ratio": None,
-            "note": "История биржи начинается ПОСЛЕ TGE — реальный TGE недоступен",
+            "note": "Exchange history starts after TGE — launch candle unavailable",
         }
 
     try:
@@ -330,5 +332,5 @@ def fetch_trading_flow(
         )
     except Exception as exc:  # pragma: no cover - network errors
         raise RuntimeError(
-            f"Не удалось выгрузить полную историю свечей {timeframe}: {exc}"
+            f"Could not download full {timeframe} candle history: {exc}"
         ) from exc

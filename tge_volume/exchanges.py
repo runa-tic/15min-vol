@@ -28,7 +28,6 @@ EXCHANGE_NAME_TO_CCXT_ID = {
     "BitMart": "bitmart",
     "BingX": "bingx",
     "LBank": "lbank",
-    "Poloniex": "poloniex",
 }
 
 # Some exchanges require special setup to ensure we talk to the spot API.

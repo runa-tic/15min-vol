@@ -58,21 +58,21 @@ Use PyInstaller to bundle the CLI into a standalone macOS executable:
    python3 -m pip install --upgrade pip
    python3 -m pip install -r requirements.txt pyinstaller
    ```
-2. Build the executable (one-file console binary):
+2. Build the executable (one-file console binary) from the repo root:
    ```bash
-   pyinstaller --onefile --name tge-volume-mac --console -m tge_volume
+   pyinstaller --onefile --name tge-volume-mac --console tge_volume/__main__.py
    ```
    - `--onefile` packs everything into a single binary.
    - `--console` preserves terminal I/O for this CLI.
-   - `-m tge_volume` runs the package the same way as `python -m tge_volume`, preventing relative-import errors at runtime.
+   - Using the package's `__main__.py` entrypoint matches `python -m tge_volume` while satisfying PyInstaller's required `scriptname` positional argument.
 3. Test the output in `dist/`:
    ```bash
-   ./dist/tge-volume --help
-   ./dist/tge-volume ELIZAOS --output-csv debug_trading_flow.csv
+   ./dist/tge-volume-mac --help
+   ./dist/tge-volume-mac ELIZAOS --output-csv debug_trading_flow.csv
    ```
 4. (Optional) Strip debug symbols to reduce size:
    ```bash
-   strip dist/tge-volume
+   strip dist/tge-volume-mac
    ```
 5. Sign and notarize for macOS distribution (requires Apple Developer credentials):
    ```bash

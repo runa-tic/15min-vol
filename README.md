@@ -70,6 +70,7 @@ Use PyInstaller to bundle the CLI into a standalone macOS executable:
    ./dist/tge-volume-mac --help
    ./dist/tge-volume-mac ELIZAOS --output-csv debug_trading_flow.csv
    ```
+   - If you move the binary elsewhere, use the full absolute path (e.g., `/Users/<you>/Desktop/15min-vol/dist/tge-volume-mac --help`). Missing the leading `/` will cause "no such file or directory" errors in shells like zsh.
 4. (Optional) Strip debug symbols to reduce size:
    ```bash
    strip dist/tge-volume-mac

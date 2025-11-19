@@ -1,8 +1,8 @@
 # 15min-vol
 
-Инструмент командной строки, который помогает исследовать листинг токена и найти первую доступную 15-минутную свечу (условный TGE) на поддерживаемых биржах из `ccxt`.
+A command-line tool that explores token listings and finds the earliest available 15-minute candle (approximate TGE) on `ccxt`-compatible exchanges.
 
-## Структура проекта
+## Project structure
 
 ```
 .
@@ -17,24 +17,34 @@
     └── utils.py
 ```
 
-- `tge_volume/coingecko.py` — функции для общения с CoinGecko и получения тикеров.
-- `tge_volume/exchanges.py` — построение списка рынков и обращение к ccxt.
-- `tge_volume/cli.py` — интерактивная оболочка, собирающая все данные и печатающая отчёт.
+- `tge_volume/coingecko.py` — CoinGecko helpers to search tokens and fetch tickers.
+- `tge_volume/exchanges.py` — market discovery and ccxt integrations.
+- `tge_volume/cli.py` — the CLI that aggregates data and prints the report.
 
-## Установка
+## Installation
 
-Требуемые зависимости перечислены в `requirements.txt`:
+Install the dependencies listed in `requirements.txt`:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-## Запуск
+## Usage
 
-CLI можно запустить напрямую из исходников:
+Run the CLI directly from the source tree:
 
 ```bash
-python -m tge_volume
+python -m tge_volume --help
 ```
 
-Скрипт запросит тикер токена, найдёт подходящий проект на CoinGecko и соберёт доступную информацию по биржам/DEX.
+Examples:
+
+```bash
+# Run interactively (you will be prompted for the ticker)
+python -m tge_volume
+
+# Provide the ticker up front and save the 15m trading flow to a custom path
+python -m tge_volume ELIZAOS --output-csv debug_trading_flow.csv
+```
+
+The app will search CoinGecko for the ticker, gather exchange data, print a consolidated table (with a volume-weighted HIGH/OPEN average), and write the raw 15-minute trading flow to CSV for debugging.

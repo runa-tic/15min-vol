@@ -4,6 +4,8 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 import csv
+import sys
+from argparse import ArgumentParser
 
 from tabulate import tabulate
 
@@ -19,18 +21,18 @@ def choose_token(matches: List[Dict[str, Any]]) -> Dict[str, Any] | None:
     if len(matches) == 1:
         return matches[0]
 
-    print("\nНайдено несколько проектов:")
+    print("\nMultiple projects found:")
     for idx, match in enumerate(matches):
         print(f"[{idx}] {match['name']} ({match['symbol']}) — id {match['id']}")
 
     while True:
         try:
-            selected = int(input("Выберите номер: "))
+            selected = int(input("Choose a number: "))
             if 0 <= selected < len(matches):
                 return matches[selected]
         except Exception:
             pass
-        print("Неверный выбор.")
+        print("Invalid selection.")
 
 
 def _format_results(results: List[Dict[str, Any]]):
@@ -59,7 +61,7 @@ def _format_results(results: List[Dict[str, Any]]):
             row["error"] or "",
         ])
 
-    print("\nДетализация:\n")
+    print("\nDetails:\n")
     print(
         tabulate(
             rows,
@@ -78,8 +80,8 @@ def _format_results(results: List[Dict[str, Any]]):
         )
     )
 
-    print("\nИТОГИ:")
-    print("TOTAL     :", f"{total_volume:.2f}")
+    print("\nSUMMARY:")
+    print("TOTAL:", f"{total_volume:.2f}")
     weighted_avg = (
         weighted_delta_sum / weighted_volume_sum if weighted_volume_sum else None
     )
@@ -171,7 +173,7 @@ def _export_trading_flow_csv(markets: List[Dict[str, Any]], path: str) -> None:
             )
 
     if not rows:
-        print("\n[DEBUG] Не удалось собрать торговый поток — данные отсутствуют.")
+        print("\n[DEBUG] Could not collect trading flow — no data available.")
         return
 
     with open(path, "w", newline="") as fp:
@@ -182,30 +184,44 @@ def _export_trading_flow_csv(markets: List[Dict[str, Any]], path: str) -> None:
     rows_written = len(rows)
     error_rows = len([r for r in rows if r["error"]])
     print(
-        f"\n[DEBUG] 15m trading flow сохранён в {path} — "
-        f"{rows_written} строк (ошибки: {error_rows})."
+        f"\n[DEBUG] 15m trading flow saved to {path} — "
+        f"{rows_written} rows (errors: {error_rows})."
     )
 
 
-def main() -> None:
-    symbol = input("Введите тикер токена (без $): ").strip()
+def main(argv: List[str] | None = None) -> None:
+    parser = ArgumentParser(description="TGE volume explorer")
+    parser.add_argument(
+        "symbol",
+        nargs="?",
+        help="Token ticker symbol (without $)",
+    )
+    parser.add_argument(
+        "--output-csv",
+        default="trading_flow_15m.csv",
+        help="Path to save the raw 15m trading flow CSV",
+    )
+
+    args = parser.parse_args(argv)
+
+    symbol = args.symbol or input("Enter token ticker (without $): ").strip()
     matches = search_token(symbol)
     if not matches:
-        print("CoinGecko ничего не нашёл.")
+        print("CoinGecko returned no matches.")
         return
 
     token = choose_token(matches)
     if not token:
-        print("Токен не выбран.")
+        print("Token not selected.")
         return
 
     coin_id = token["id"]
-    print(f"\nВыбран токен: {token['name']} ({token['symbol']})")
+    print(f"\nSelected token: {token['name']} ({token['symbol']})")
 
     tickers, _ = get_coin_tickers(coin_id)
     markets = build_markets(tickers)
 
-    print(f"\nНайдено бирж: {len(markets)}")
+    print(f"\nExchanges found: {len(markets)}")
 
     results: List[Dict[str, Any]] = []
     total = len(markets)
@@ -253,8 +269,8 @@ def main() -> None:
     _format_results(results)
 
     # Dump raw 15m trading flow for debugging incorrect TGE selection.
-    _export_trading_flow_csv(markets, "trading_flow_15m.csv")
+    _export_trading_flow_csv(markets, args.output_csv)
 
 
 if __name__ == "__main__":  # pragma: no cover
-    main()
+    main(sys.argv[1:])

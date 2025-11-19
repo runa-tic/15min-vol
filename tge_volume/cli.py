@@ -9,7 +9,7 @@ from tabulate import tabulate
 
 from .coingecko import get_coin_tickers, search_token
 from .exchanges import build_markets, fetch_exchange_stats, fetch_trading_flow
-from .utils import ts_to_str
+from .utils import shorten_asset, ts_to_str
 
 
 def choose_token(matches: List[Dict[str, Any]]) -> Dict[str, Any] | None:
@@ -50,7 +50,7 @@ def _format_results(results: List[Dict[str, Any]]):
         rows.append([
             row["exchange_name"],
             row.get("ccxt_id") or "-",
-            f"{row['base']}/{row['quote']}",
+            f"{shorten_asset(row['base'])}/{shorten_asset(row['quote'])}",
             ts_to_str(row["tge_ts"]),
             f"{row['first_15m_volume']:.2f}" if row["first_15m_volume"] else "-",
             f"{row['day_open']:.6f}" if row["day_open"] else "-",

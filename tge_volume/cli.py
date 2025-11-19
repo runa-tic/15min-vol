@@ -3,10 +3,12 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
+import csv
+
 from tabulate import tabulate
 
-from .coingecko import get_coin_tickers, get_expected_tge_ts, search_token
-from .exchanges import build_markets, fetch_exchange_stats
+from .coingecko import get_coin_tickers, search_token
+from .exchanges import build_markets, fetch_exchange_stats, fetch_trading_flow
 from .utils import ts_to_str
 
 
@@ -32,32 +34,17 @@ def choose_token(matches: List[Dict[str, Any]]) -> Dict[str, Any] | None:
 
 
 def _format_results(results: List[Dict[str, Any]]):
-    valid = [r for r in results if r["tge_ts"]]
-    cex = valid
-
-    print("\n=======================")
-    print("   PRICE ACTION / TGE")
-    print("=======================\n")
-
-    if valid:
-        earliest = min(valid, key=lambda r: r["tge_ts"])
-        print("Самый ранний листинг:", earliest["exchange_name"], ts_to_str(earliest["tge_ts"]))
-
-    if cex:
-        earliest_cex = min(cex, key=lambda r: r["tge_ts"])
-        print("ЯКОРЬ (первый CEX):", earliest_cex["exchange_name"], ts_to_str(earliest_cex["tge_ts"]))
-    else:
-        print("CEX-листингов не найдено (по данным ccxt).")
-
     rows = []
-    total_cex = 0.0
+    total_volume = 0.0
 
     for row in results:
         volume = row["first_15m_volume"] or 0
-        total_cex += volume
+        total_volume += volume
 
         rows.append([
             row["exchange_name"],
+            row.get("ccxt_id") or "-",
+            f"{row['base']}/{row['quote']}",
             ts_to_str(row["tge_ts"]),
             f"{row['first_15m_volume']:.2f}" if row["first_15m_volume"] else "-",
             f"{row['day_open']:.6f}" if row["day_open"] else "-",
@@ -68,24 +55,123 @@ def _format_results(results: List[Dict[str, Any]]):
 
     print("\nДетализация:\n")
     print(
-            tabulate(
-                rows,
-                headers=[
-                    "EXCHANGE",
-                    "TGE DATE",
-                    "15m VOL (USDT)",
-                    "DAY1 OPEN",
-                    "DAY1 HIGH",
-                    "HIGH/OPEN",
-                    "NOTE/ERROR",
-                ],
+        tabulate(
+            rows,
+            headers=[
+                "EXCHANGE",
+                "CCXT ID",
+                "PAIR",
+                "TGE DATE",
+                "15m VOL (USDT)",
+                "DAY1 OPEN",
+                "DAY1 HIGH",
+                "HIGH/OPEN",
+                "NOTE/ERROR",
+            ],
             tablefmt="github",
         )
     )
 
     print("\nИТОГИ:")
-    print("TOTAL_CEX :", f"{total_cex:.2f}")
-    print("TOTAL     :", f"{total_cex:.2f}")
+    print("TOTAL     :", f"{total_volume:.2f}")
+
+
+def _export_trading_flow_csv(markets: List[Dict[str, Any]], path: str) -> None:
+    """Dump 15m OHLCV across all available exchanges for debugging."""
+
+    fieldnames = [
+        "exchange",
+        "symbol",
+        "timestamp_ms",
+        "timestamp",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume_base",
+        "volume_quote",
+        "error",
+    ]
+
+    rows: List[Dict[str, Any]] = []
+
+    for market in markets:
+        exchange_name = market["exchange_name"]
+        symbol_pair = f"{market['base']}/{market['quote']}"
+
+        if not market["ccxt_id"]:
+            rows.append(
+                {
+                    "exchange": exchange_name,
+                    "symbol": symbol_pair,
+                    "timestamp_ms": None,
+                    "timestamp": None,
+                    "open": None,
+                    "high": None,
+                    "low": None,
+                    "close": None,
+                    "volume_base": None,
+                    "volume_quote": None,
+                    "error": market.get("disabled_reason")
+                    or "unsupported",
+                }
+            )
+            continue
+
+        try:
+            candles = fetch_trading_flow(
+                market["ccxt_id"], market["base"], market["quote"], timeframe="15m"
+            )
+            for candle in candles:
+                ts, open_, high, low, close, volume = candle
+                volume_quote = volume * close if volume and close else None
+                rows.append(
+                    {
+                        "exchange": exchange_name,
+                        "symbol": symbol_pair,
+                        "timestamp_ms": ts,
+                        "timestamp": ts_to_str(ts),
+                        "open": open_,
+                        "high": high,
+                        "low": low,
+                        "close": close,
+                        "volume_base": volume,
+                        "volume_quote": volume_quote,
+                        "error": None,
+                    }
+                )
+        except Exception as exc:
+            rows.append(
+                {
+                    "exchange": exchange_name,
+                    "symbol": symbol_pair,
+                    "timestamp_ms": None,
+                    "timestamp": None,
+                    "open": None,
+                    "high": None,
+                    "low": None,
+                    "close": None,
+                    "volume_base": None,
+                    "volume_quote": None,
+                    "error": str(exc),
+                }
+            )
+
+    if not rows:
+        print("\n[DEBUG] Не удалось собрать торговый поток — данные отсутствуют.")
+        return
+
+    with open(path, "w", newline="") as fp:
+        writer = csv.DictWriter(fp, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    rows_written = len(rows)
+    error_rows = len([r for r in rows if r["error"]])
+    print(
+        f"\n[DEBUG] 15m trading flow сохранён в {path} — "
+        f"{rows_written} строк (ошибки: {error_rows})."
+    )
 
 
 def main() -> None:
@@ -103,27 +189,22 @@ def main() -> None:
     coin_id = token["id"]
     print(f"\nВыбран токен: {token['name']} ({token['symbol']})")
 
-    tickers, coin_data = get_coin_tickers(coin_id)
+    tickers, _ = get_coin_tickers(coin_id)
     markets = build_markets(tickers)
 
     print(f"\nНайдено бирж: {len(markets)}")
-    for market in markets:
-        print(
-            f" - {market['exchange_name']} → ccxt_id={market['ccxt_id']} → {market['base']}/{market['quote']}"
-        )
-
-    expected_tge_ts = get_expected_tge_ts(coin_data)
-    print("\nОжидаемый (оценочный) TGE по данным CoinGecko:", ts_to_str(expected_tge_ts))
 
     results: List[Dict[str, Any]] = []
-    for market in markets:
-        print(f"\nОбработка {market['exchange_name']}...")
+    total = len(markets)
+    for idx, market in enumerate(markets, start=1):
+        progress = f"[{idx}/{total}] {market['exchange_name']}"
+        print(progress, end="\r")
         if not market["ccxt_id"]:
             results.append(
                 {
                     **market,
                     "error": market.get("disabled_reason")
-                    or "Биржа не поддерживается ccxt",
+                    or "unsupported",
                     "tge_ts": None,
                     "tge_open": None,
                     "first_15m_volume": None,
@@ -139,7 +220,6 @@ def main() -> None:
                 market["ccxt_id"],
                 market["base"],
                 market["quote"],
-                expected_tge_ts,
             )
             results.append({**market, **stats, "error": stats.get("note")})
         except Exception as exc:
@@ -155,8 +235,12 @@ def main() -> None:
                     "day_delta_ratio": None,
                 }
             )
-
+    print(" " * 40, end="\r")
+    print()
     _format_results(results)
+
+    # Dump raw 15m trading flow for debugging incorrect TGE selection.
+    _export_trading_flow_csv(markets, "trading_flow_15m.csv")
 
 
 if __name__ == "__main__":  # pragma: no cover

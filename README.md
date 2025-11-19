@@ -67,12 +67,12 @@ Use PyInstaller to bundle the CLI into a standalone macOS executable:
    - `-m tge_volume` runs the package the same way as `python -m tge_volume`, preventing relative-import errors at runtime.
 3. Test the output in `dist/`:
    ```bash
-   ./dist/tge-volume-mac --help
-   ./dist/tge-volume-mac ELIZAOS --output-csv debug_trading_flow.csv
+   ./dist/tge-volume --help
+   ./dist/tge-volume ELIZAOS --output-csv debug_trading_flow.csv
    ```
 4. (Optional) Strip debug symbols to reduce size:
    ```bash
-   strip dist/tge-volume-mac
+   strip dist/tge-volume
    ```
 5. Sign and notarize for macOS distribution (requires Apple Developer credentials):
    ```bash

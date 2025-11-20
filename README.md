@@ -81,10 +81,10 @@ After it finishes, double-click `dist/mac_run_cli.command` in Finder (or run `./
    - Using the package's `__main__.py` entrypoint matches `python -m tge_volume` while satisfying PyInstaller's required `scriptname` positional argument.
 3. Copy the double-click wrapper into the build output and make it executable:
    ```bash
-   cp mac_run_cli.command dist/
-   chmod +x dist/mac_run_cli.command
+   install -m 755 mac_run_cli.command dist/mac_run_cli.command
    ```
    - The wrapper expects `tge-volume-mac` to live next to it inside `dist/`.
+   - If Finder still reports a permissions warning (e.g., after copying between drives), run `chmod +x dist/mac_run_cli.command` once to restore the execute bit.
 4. Test locally:
    ```bash
    ./dist/mac_run_cli.command --help

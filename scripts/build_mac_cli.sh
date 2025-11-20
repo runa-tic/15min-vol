@@ -11,7 +11,9 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
 echo "==> Installing build dependencies (pip, requirements, pyinstaller)"
-python3 -m pip install --upgrade pip
+if ! python3 -m pip install --upgrade pip; then
+  echo "Skipping pip upgrade (likely brew-managed Python); continuing with existing pip." >&2
+fi
 python3 -m pip install -r requirements.txt pyinstaller
 
 # Clean previous artifacts so we don't ship stale binaries.

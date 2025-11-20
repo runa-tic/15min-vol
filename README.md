@@ -69,7 +69,7 @@ After it finishes, double-click `dist/mac_run_cli.command` in Finder (or run `./
 
 1. Install build tooling (preferably in a clean virtual environment):
    ```bash
-   python3 -m pip install --upgrade pip
+   python3 -m pip install --upgrade pip || echo "(Skipping pip upgrade; brew-managed Python may block uninstall)"
    python3 -m pip install -r requirements.txt pyinstaller
    ```
 2. Build the console executable from the repo root:
